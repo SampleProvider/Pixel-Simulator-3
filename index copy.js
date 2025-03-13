@@ -1,5 +1,5 @@
-let renderShader = await(await fetch("./renderShader.wgsl")).text();
-let computeShader = await(await fetch("./computeShader.wgsl")).text();
+const renderShader = await(await fetch("./renderShader.wgsl")).text();
+const computeShader = await(await fetch("./computeShader.wgsl")).text();
 
 if (!navigator.gpu) {
 	throw new Error("WebGPU not supported on this browser.");
@@ -22,35 +22,31 @@ ctx.configure({
 const overlayCanvas = document.getElementById("overlayCanvas");
 const overlayCtx = overlayCanvas.getContext("2d");
 
-let tick = new Uint32Array([0]);
+let tick = new Uint32Array(0);
 const tickBuffer = device.createBuffer({
 	label: "Tick",
 	size: 8,
-	usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
 device.queue.writeBuffer(tickBuffer, 0, tick);
 
-const gridWidth = 50;
-const gridHeight = 50;
+const gridSize = new Float32Array([10, 10]);
+const gridSizeBuffer = device.createBuffer({
+	label: "Grid Size",
+	size: gridSize.byteLength,
+	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(gridSizeBuffer, 0, gridSize);
 
-renderShader = renderShader.replaceAll("GRID_WIDTH", gridWidth).replaceAll("GRID_HEIGHT", gridHeight);
-computeShader = computeShader.replaceAll("GRID_WIDTH", gridWidth).replaceAll("GRID_HEIGHT", gridHeight);
+const grid = new Uint32Array(gridSize[0] * gridSize[1]);
 
-const grid = new Uint32Array(gridWidth * gridHeight);
-
-for (let i = 0; i < gridWidth * gridHeight; i++) {
-	if (i % gridWidth > 20 && i % gridWidth < 30) {
+for (let i = 0; i < gridSize[0] * gridSize[1]; i++) {
+	if (Math.random() < 0.5) {
 		grid[i] = 2;
-	}
-	// if (Math.random() < 0.5) {
-	// 	grid[i] = 1;
-	// }
-	else {
-		grid[i] = 0;
 	}
 	// grid[i] = Math.floor(Math.random() * 3);
 }
-// for (let i = 50; i < gridWidth * gridHeight; i++) {
+// for (let i = 50; i < gridSize[0] * gridSize[1]; i++) {
 // 	grid[i] = 2;
 // }
 // grid[50] = 2;
@@ -62,14 +58,9 @@ for (let i = 0; i < gridWidth * gridHeight; i++) {
 // grid[50] = 1;
 // grid[60] = 1;
 // grid[61] = 1;
-// grid[0] = 1;
-// grid[2] = 1;
-// grid[10] = 1;
-// grid[12] = 1;
-// grid[3] = 1;
 let sand = 0;
-for (let i = 0; i < gridWidth * gridHeight; i++) {
-	if (grid[i] == 1) {
+for (let i = 0; i < gridSize[0] * gridSize[1]; i++) {
+	if (grid[i] == 2) {
 		sand++;
 	}
 }
@@ -79,46 +70,24 @@ const gridBuffers = [
 	device.createBuffer({
 		label: "Grid 1",
 		size: grid.byteLength,
-		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 	}),
 	device.createBuffer({
 		label: "Grid 2",
 		size: grid.byteLength,
-		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 	}),
 ];
-
-const countPixels = async function() {
-	const encoder = device.createCommandEncoder();
-	let newBuffer = device.createBuffer({
-		size: grid.byteLength,
-		usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-	});
-	encoder.copyBufferToBuffer(gridBuffers[0], 0, newBuffer, 0, grid.byteLength);
-	await device.queue.submit([encoder.finish()]);
-	await newBuffer.mapAsync(GPUMapMode.READ, 0, grid.byteLength);
-
-	let pixels = [0, 0, 0];
-	let map = newBuffer.getMappedRange(0, grid.byteLength);
-	let array = new Uint8Array(map);
-	for (let i = 0; i < array.length; i++) {
-		pixels[array[i]]++;
-	}
-	console.log(pixels);
-
-	newBuffer.unmap();
-	newBuffer.destroy();
-};
 // const grid1Buffer = device.createBuffer({
 // 	label: "Grid 1",
 // 	size: grid.byteLength,
 // 	usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 // });
-// for (let i = 0; i < gridWidth * gridHeight; i++) {
+// for (let i = 0; i < gridSize[0] * gridSize[1]; i++) {
 // 	grid[i] = Math.round(Math.random());
 // }
 device.queue.writeBuffer(gridBuffers[0], 0, grid);
-for (let i = 0; i < gridWidth * gridHeight; i++) {
+for (let i = 0; i < gridSize[0] * gridSize[1]; i++) {
 	grid[i] = 255;
 }
 device.queue.writeBuffer(gridBuffers[1], 0, grid);
@@ -164,9 +133,13 @@ const renderBindGroupLayout = device.createBindGroupLayout({
 	entries: [{
 		binding: 0,
 		visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-		buffer: { type: "read-only-storage" },
+		buffer: {},
 	}, {
 		binding: 1,
+		visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+		buffer: {},
+	}, {
+		binding: 2,
 		visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
 		buffer: { type: "read-only-storage" },
 	}],
@@ -179,6 +152,9 @@ const renderBindGroup = device.createBindGroup({
 		resource: { buffer: tickBuffer },
 	}, {
 		binding: 1,
+		resource: { buffer: gridSizeBuffer },
+	}, {
+		binding: 2,
 		resource: { buffer: gridBuffers[0] },
 	}],
 });
@@ -203,7 +179,7 @@ const renderPipeline = device.createRenderPipeline({
 	},
 });
 
-const WORKGROUP_SIZE = 1;
+const WORKGROUP_SIZE = 5;
 const computeShaderModule = device.createShaderModule({
 	label: "Compute Shader",
 	code: computeShader,
@@ -213,13 +189,17 @@ const computeBindGroupLayout = device.createBindGroupLayout({
 	entries: [{
 		binding: 0,
 		visibility: GPUShaderStage.COMPUTE,
-		buffer: { type: "read-only-storage" },
+		buffer: {},
 	}, {
 		binding: 1,
 		visibility: GPUShaderStage.COMPUTE,
-		buffer: { type: "storage" },
+		buffer: {},
 	}, {
 		binding: 2,
+		visibility: GPUShaderStage.COMPUTE,
+		buffer: { type: "storage" },
+	}, {
+		binding: 3,
 		visibility: GPUShaderStage.COMPUTE,
 		buffer: { type: "storage" },
 	}],
@@ -232,9 +212,12 @@ const computeBindGroup = device.createBindGroup({
 		resource: { buffer: tickBuffer },
 	}, {
 		binding: 1,
-		resource: { buffer: gridBuffers[0] },
+		resource: { buffer: gridSizeBuffer },
 	}, {
 		binding: 2,
+		resource: { buffer: gridBuffers[0] },
+	}, {
+		binding: 3,
 		resource: { buffer: gridBuffers[1] },
 	}],
 });
@@ -333,34 +316,27 @@ var updateTimes = function(times, time) {
 
 var update = function() {
 	let totalStart = performance.now();
+
+	const encoder = device.createCommandEncoder();
 	
 	let computeStart = performance.now();
 
-	for (var i = 0; i < 1; i++) {
+	const computePass = encoder.beginComputePass();
 
-		const encoder = device.createCommandEncoder();
+	computePass.setBindGroup(0, computeBindGroup);
+	computePass.setPipeline(computePipelines[0]);
 
-		const computePass = encoder.beginComputePass();
-		computePass.setBindGroup(0, computeBindGroup);
-		computePass.setPipeline(computePipelines[0]);
-	
-		computePass.dispatchWorkgroups(Math.ceil(gridWidth / WORKGROUP_SIZE), Math.ceil(gridHeight / WORKGROUP_SIZE));
-	
-		computePass.setPipeline(computePipelines[1]);
-	
-		computePass.dispatchWorkgroups(Math.ceil(gridWidth / WORKGROUP_SIZE), Math.ceil(gridHeight / WORKGROUP_SIZE));
-		// computePass.dispatchWorkgroups(Math.ceil(gridWidth * gridHeight / WORKGROUP_SIZE));
+	computePass.dispatchWorkgroups(Math.ceil(gridSize[0] / WORKGROUP_SIZE), Math.ceil(gridSize[1] / WORKGROUP_SIZE));
 
-	
-		computePass.end();
+	computePass.setPipeline(computePipelines[1]);
 
-		tick[0] += 1;
-		
-		device.queue.writeBuffer(tickBuffer, 0, tick);
-		device.queue.submit([encoder.finish()]);
-	}
+	computePass.dispatchWorkgroups(Math.ceil(gridSize[0] / WORKGROUP_SIZE), Math.ceil(gridSize[1] / WORKGROUP_SIZE));
+	// computePass.dispatchWorkgroups(Math.ceil(gridSize[0] * gridSize[1] / WORKGROUP_SIZE));
 
-	const encoder = device.createCommandEncoder();
+	computePass.end();
+
+	tick[0] += 1;
+	device.queue.writeBuffer(tickBuffer, 0, tick);
 
 	let computeEnd = performance.now();
 
@@ -379,8 +355,8 @@ var update = function() {
 	renderPass.setPipeline(renderPipeline);
     renderPass.setVertexBuffer(0, vertexBuffer);
 
-	// renderPass.draw(totalVertices, gridWidth * gridHeight);
-    renderPass.draw(vertices.length / 2, gridWidth * gridHeight);
+	// renderPass.draw(totalVertices, gridSize[0] * gridSize[1]);
+    renderPass.draw(vertices.length / 2, gridSize[0] * gridSize[1]);
     // renderPass.draw(vertices.length / 2, 1);
 
 	renderPass.end();
@@ -481,5 +457,3 @@ var update = function() {
 };
 // window.requestAnimationFrame(update);
 setInterval(update, 1000);
-
-export default countPixels;

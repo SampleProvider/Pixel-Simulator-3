@@ -3,7 +3,8 @@ var pixels = [];
 var parse = function(string) {
     var lines = string.replaceAll("\t", "").split("\n");
     var pixel = null;
-    var currentSection = null;
+    var section = null;
+    var symmetry = null;
     var globalInputs = {};
     var globalOutputs = {};
     var pixelInputs = {};
@@ -39,7 +40,9 @@ var parse = function(string) {
                 }
             }
         }
-        else if ()
+        else if (section == null) {
+            
+        }
         lines.shift();
     }
     // if we are not in pixel:
